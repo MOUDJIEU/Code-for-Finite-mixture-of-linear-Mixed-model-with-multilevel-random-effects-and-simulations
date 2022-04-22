@@ -1,0 +1,467 @@
+
+
+################# Estimation function
+
+library(flexmix)
+library(mvtnorm)
+library(MASS)
+library(nlme)
+
+####################################################################################################################################################################
+
+#### Matrix inversion function
+
+inverse_sym = function(M)
+{
+  res <- eigen(M)
+  Inv_D <- diag(1/res$values)
+  P <- res$vectors
+  Inv_M <- (P%*%Inv_D)%*%t(P)
+  return(Inv_M)
+}
+
+
+
+
+######################################################################################################################################################################
+
+
+############### Initialization
+    
+InitF = function(formula,Data,G)
+{
+  ### Best Flexmix model
+  AIC <- c()
+  resK <- list()
+  for(k in 1:100){
+    resK[[k]] <- flexmix(formula,Data,G)
+    AIC[k] <- AIC(resK[[k]])
+  }
+  res <- resK[[which.min(AIC)]]
+    
+  
+  ### Initial classification
+  u <- as.vector(clusters(res))
+  
+  ### Initial fixed effect parameters
+  A <- as.matrix(parameters(res))
+  MatBeta <- A[-dim(A)[1],]
+  
+  ### Initial variances
+  Vr <- rep(1,G)
+  Vi <- rep(1,G)
+  Ve <- rep(1,G)
+  
+  ### Initial probabilities
+  P <- as.vector(table(u)/dim(Data)[1])
+  
+  ### Results
+  return(list(P=P,MatBeta=MatBeta,Vr=Vr,Vi=Vi,Ve=Ve,Rgi=u))
+}
+
+
+#######################################################################################################################################################################
+
+################################## E-Step 
+
+### Indexation function
+VectInd = function(i,u)
+{
+  n <- length(u)
+  if(i==1)
+  {
+    a <- u[1]
+    b <- sum(u[2:n])
+    vc <- c(rep(1,a),rep(0,b))
+    return(vc)
+  }
+  else if(i==n)
+  {
+    a <- sum(u[1:(n-1)])
+    b <- u[n]
+    vc <- c(rep(0,a),rep(1,b))
+    return(vc)
+  }
+  else
+  {
+    a <- sum(u[1:(i-1)])
+    b <- sum(u[(i+1):n])
+    vc <- c(rep(0,a),rep(1,u[i]),rep(0,b))
+    return(vc)
+  }
+}
+
+
+### Expectation function
+Expect = function(Data,theta)
+{
+  m <-   ncol(Data)
+  n <- nrow(Data)
+  G <- length(theta$P)
+  ww <- rep(1,n)
+  X <- cbind(ww,Data[,-c(1,(m-1):m)])
+  u <- as.vector(Data[,m])
+  Ns <- length(unique(u))
+  MatVrai <- matrix(nrow=Ns,ncol=G)
+  nGs <- as.vector(table(u))
+
+  for(s in 1:Ns)
+  {
+    Inds <- which(u==s)
+    
+    Ys <- as.vector(Data[,1])[Inds]
+    
+    a <- nGs[s]
+    Mat1 <- matrix(rep(1,a*a),ncol=a)
+    MatErr <- diag(1,a)
+    
+    uId <- as.vector(Data[Inds,m-1])
+    VId <- as.vector(table(uId))
+    if(length(VId)==1){
+      Zs <- diag(VId)
+    }
+    if(length(VId)!=1){
+      Zs <- sapply(1:length(VId),VectInd,VId)
+    }
+    Zf <- Zs%*%t(Zs)
+    d <- c()
+    for(k in 1:G)
+    {
+      Mus <- as.vector(as.matrix(X[Inds,])%*%matrix(theta$MatBeta[,k],ncol=1))
+      Vsk <- (Mat1*theta$Vi[k])+(Zf*theta$Ve[k])+(MatErr*theta$Vr[k])
+      MatVrai[s,k] <- theta$P[k]*dmvnorm(Ys,Mus,Vsk)
+      d[k] <- sqrt(sum(Mus^2))
+    }
+    
+  }
+  
+  u <-  apply(MatVrai,1,sum)
+  MatF <- MatVrai/u
+  return(list(MatF=MatF,MatVrai=MatVrai))
+}
+
+
+### Loglikelihood function
+LogVraiF= function(MatVrai)
+{
+  a <- apply(MatVrai,1,sum)
+  b <- log(a)
+  d1 <- sum(b)
+  return(d1)
+}
+
+
+#####################################################################################################################################################################
+
+
+######################################### Maximization-Step 
+
+### Maximization function
+Maxim = function(Data,MatF,theta)
+{
+  Ns <- nrow(MatF)
+  n <- nrow(Data)
+  m <- ncol(Data)
+  nvar <- m-2
+  G <- ncol(MatF)
+  a3 <- matrix(rep(1,n),ncol=1)
+  a4 <- as.matrix(Data[,-c(1,(nvar+1):m)])
+  X <- cbind(a3,a4)
+  Y <- as.vector(Data[,1])
+  
+  w <- apply(MatF,2,sum)
+  P <- w/Ns
+  
+  Beta <- matrix(nrow=nvar,ncol=G)
+  u <- as.vector(Data[,m])
+  nGs <- as.vector(table(u))
+  
+  for(k in 1:G)
+  {
+    A <- matrix(nrow=nvar,ncol=Ns)
+    B <- array(dim=c(nvar,nvar,Ns))
+    
+    for(s in 1:Ns)
+    {
+      
+      Inds <- which(u==s)
+      
+      Ys <- as.vector(Data[,1])[Inds]
+      
+      Xs <- X[Inds,]
+      
+      a <- nGs[s]
+      Mat1 <- matrix(rep(1,a*a),ncol=a)
+      MatErr <- diag(1,a)
+      
+      uId <- as.vector(Data[Inds,m-1])
+      VId <- as.vector(table(uId))
+      if(length(VId)==1){
+        Zs <- diag(VId)
+      }
+      if(length(VId)!=1){
+        Zs <- sapply(1:length(VId),VectInd,VId)
+      }
+      Zf <- Zs%*%t(Zs)
+      Vsk <- (Mat1*theta$Vi[k])+(Zf*theta$Ve[k])+(MatErr*theta$Vr[k])
+      InVsk <- inverse_sym(Vsk)
+      
+      MatPond <- MatF[s,k]*t(Xs)
+      A[,s] <- (MatPond%*%InVsk)%*%Ys 
+      B[,,s] <- (MatPond%*%InVsk)%*%Xs
+    }
+    NumK <- matrix(apply(A,1,sum),ncol=1)
+    DenumK <- B[,,1]
+    for(j in 2:Ns)
+    {
+      DenumK <- DenumK + B[,,j]
+    }
+    DenumK2 <- inverse_sym(DenumK)
+    
+    Beta[,k] <- as.vector(DenumK2%*%NumK)
+  }
+  
+  VrS <- c()
+  VeS <- c()
+  ViS <- c()
+  for(k in 1:G)
+  {
+    U0k <- list(); U1k <- list(); U2k <- list(); U3k <- list(); U4k <- list(); U5k <- list() 
+    LY <- list() ; LX <- list()
+    
+    
+    for(s in 1:Ns)
+    {
+      
+      Inds <- which(u==s)
+      
+      Ys <- as.vector(Data[,1])[Inds]
+      LY[[s]] <- Ys
+      
+      Xs <- X[Inds,]
+      LX[[s]] <- Xs
+      
+      a <- nGs[s]
+      Mat1 <- matrix(rep(1,a*a),ncol=a)
+      MatErr <- diag(1,a)
+      
+      uId <- as.vector(Data[Inds,m-1])
+      VId <- as.vector(table(uId))
+      if(length(VId)==1){
+        Zs <- diag(VId)
+      }
+      if(length(VId)!=1){
+        Zs <- sapply(1:length(VId),VectInd,VId)
+      }
+      Zf <- Zs%*%t(Zs)
+      Vsk <- (Mat1*theta$Vi[k])+(Zf*theta$Ve[k])+(MatErr*theta$Vr[k])
+      InVsk <- solve(Vsk)
+      
+      U0k[[s]] <- InVsk%*%InVsk
+      U1k[[s]] <- (InVsk%*%Mat1)%*%InVsk
+      U2k[[s]] <- (InVsk%*%Zf)%*%InVsk
+      U3k[[s]] <- (InVsk%*%Mat1)%*%(InVsk%*%Mat1)
+      U4k[[s]] <- (InVsk%*%Mat1)%*%(InVsk%*%Zf)
+      U5k[[s]] <- (InVsk%*%Zf)%*%(InVsk%*%Zf)
+      
+    }
+    
+    TU0k <- c();  TU1k <- c(); TU2k <- c(); TU3k <- c(); TU4k <- c();  TU5k <- c();
+    for(s in 1:Ns)
+    {
+      TU0k[s] <- sum(diag(U0k[[s]]))
+      TU1k[s] <- sum(diag(U1k[[s]]))
+      TU2k[s] <- sum(diag(U2k[[s]]))
+      TU3k[s] <- sum(diag(U3k[[s]]))
+      TU4k[s] <- sum(diag(U4k[[s]]))
+      TU5k[s] <- sum(diag(U5k[[s]]))
+    }
+    M0k <- sum(MatF[,k]*TU0k)
+    M1k <- sum(MatF[,k]*TU1k)
+    M2k <- sum(MatF[,k]*TU2k)
+    M3k <- sum(MatF[,k]*TU3k)
+    M4k <- sum(MatF[,k]*TU4k)
+    M5k <- sum(MatF[,k]*TU5k)
+    
+    VectMatBeta <- matrix(Beta[,k],ncol=1)
+    VR0 <- c(); VR1 <- c(); VR2 <- c()
+    for(s in 1:Ns)
+    {
+      EMu <- LY[[s]]-(LX[[s]]%*%VectMatBeta)
+      VR0[s] <- (t(EMu)%*%U0k[[s]])%*%EMu
+      VR1[s] <- (t(EMu)%*%U1k[[s]])%*%EMu
+      VR2[s] <- (t(EMu)%*%U2k[[s]])%*%EMu
+    }
+    R0sk <- sum(MatF[,k]*VR0)
+    R1sk <- sum(MatF[,k]*VR1)
+    R2sk <- sum(MatF[,k]*VR2)
+    
+    MatVarCal <- matrix(c(M0k,M1k,M2k,M1k,M3k,M4k,M2k,M4k,M5k),ncol=3)
+    MX <- matrix(c(R0sk,R1sk,R2sk,M1k,M3k,M4k,M2k,M4k,M5k),ncol=3)
+    MY <- matrix(c(M0k,M1k,M2k,R0sk,R1sk,R2sk,M2k,M4k,M5k),ncol=3)
+    MZ <- matrix(c(M0k,M1k,M2k,M1k,M3k,M4k,R0sk,R1sk,R2sk),ncol=3)
+    
+    VrS[k] <- abs(det(MX)/det(MatVarCal))
+    ViS[k] <- abs(det(MY)/det(MatVarCal))
+    VeS[k] <- abs(det(MZ)/det(MatVarCal))
+  }
+  
+  return(list(MatBeta=Beta,P=P,Vi=ViS,Vr=VrS,Ve=VeS))
+}
+
+
+
+#######################################################################################################################################################################
+
+######################################### EM-Algorithm 
+
+EstimF = function(formula,Data,G,e=0.00001,Nb=30)
+{
+  ### Initialisation
+  k <- 1
+  Cpt <- 1
+  while((k!=0)&(Cpt<=20))
+  {
+    theta <- InitF(formula,Data,G)
+    
+    ### Control of values 
+    A <- as.matrix(table(theta$Rgi,Data[,ncol(Data)]))
+    Rg <- as.vector(apply(A,2,which.max))
+    nG2 <- length(unique(Rg))
+    nE2 <- length(Rg)
+    B <- matrix(ncol=nG2,nrow=nE2)
+    for(i in 1:nG2)
+    {
+      Id <- which(Rg==unique(Rg)[i])
+      u <- rep(0,nE2)
+      u[Id] <- 1
+      B[,i] <- u
+    }
+    uI <- apply(B,1,sum)
+    uItest <- which(uI==0)
+    k <- length(uItest)
+    Cpt <- Cpt+1
+  }
+  if(ncol(B)==1)
+  {
+    nl <- length(unique(Data[,ncol(Data)]))
+    B <- matrix(rep(1,nl),ncol=1)
+    theta <- Maxim(Data,B,theta)
+    theta$MatBeta <- matrix(theta$MatBeta,ncol=1)
+    Rg <- rep(1,nl)
+    Rs <- 1
+    return(list(theta=theta,Rg=Rg,Rs=Rs))
+  }
+  
+  Ge <- length(theta$P)
+  if(Ge<G)
+  {
+    theta$MatBeta <- theta$MatBeta[,-((Ge+1):G)]
+    theta$Vr <- theta$Vr[-((Ge+1):G)]
+    theta$Ve <- theta$Ve[-((Ge+1):G)]
+    theta$Vi <- theta$Vi[-((Ge+1):G)]
+    theta$P <- theta$P[-((Ge+1):G)]
+  }
+  
+  theta <- Maxim(Data,B,theta)
+  res <- Expect(Data,theta)
+  a <- apply(res$MatVrai,2,sum)
+  u1 <- which(a==0)
+  u2 <- which(a!=0)
+  if(length(u1)!=0)
+  {
+    theta$MatBeta <- theta$MatBeta[,-u1]
+    theta$Vr <- theta$Vr[-u1]
+    theta$Ve <- theta$Ve[-u1]
+    theta$Vi <- theta$Vi[-u1]
+    theta$P <- theta$P[-u1]
+    res$MatF <- res$MatF[-u1]
+    if(length(u2)==1)
+    {
+      Rg <- apply(res$MatVrai,1,which.max)
+      Rs=1
+      Vrai[1] <- LogVraiF(res$MatVrai)
+      return(list(theta=theta,Rg=Rg,Rs=Rs))
+    }
+  }
+  
+  b <- apply(res$MatVrai,1,sum)
+  Ind_b <- which(b==0)
+  if(length(Ind_b)!=0)
+  {
+    n_k <- length(Ind_b)
+    P_v <- ncol(res$MatVrai)
+    for(k in 1:n_k)
+    {
+      res$MatF[Ind_b[k],] <- B[Ind_b[k],]
+      a <- min(as.vector(res$MatVrai)[which(as.vector(res$MatVrai)!=0)])
+      Ind_a <- which(as.vector(B[Ind_b[k],])!=0)
+      res$MatVrai[Ind_b[k],][Ind_a] <- a
+    }
+  }
+  
+  
+  
+  ### Iterations
+  Vrai <- c()
+  Vrai[1] <- LogVraiF(res$MatVrai)
+  test <- e+1
+  
+ 
+  Rs <- 2
+  while((test > e)&(Rs<=Nb))
+  {
+    theta <- Maxim(Data,res$MatF,theta)
+    B <- res$MatF
+    
+    res <- Expect(Data,theta)
+    
+    ### Control of values
+    a <- apply(res$MatVrai,2,sum)
+    u1 <- which(a==0)
+    u2 <- which(a!=0)
+    if(length(u1)!=0)
+    {
+      theta$MatBeta <- theta$MatBeta[,-u1]
+      theta$Vr <- theta$Vr[-u1]
+      theta$Ve <- theta$Ve[-u1]
+      theta$Vi <- theta$Vi[-u1]
+      theta$P <- theta$P[-u1]
+      res$MatF <- res$MatF[-u1]
+      if(length(u2)==1)
+      {
+        Rg <- apply(res$MatVrai,1,which.max)
+        Rs=1
+        Vrai[1] <- LogVraiF(res$MatVrai)
+        return(list(theta=theta,Rg=Rg,Rs=Rs))
+      }
+    }
+    
+    b <- apply(res$MatVrai,1,sum)
+    Ind_b <- which(b==0)
+    if(length(Ind_b)!=0)
+    {
+      n_k <- length(Ind_b)
+      P_v <- ncol(res$MatVrai)
+      for(k in 1:n_k)
+      {
+        res$MatF[Ind_b[k],] <- B[Ind_b[k],]
+        a <- min(as.vector(res$MatVrai)[which(as.vector(res$MatVrai)!=0)])
+        Ind_a <- which(as.vector(B[Ind_b[k],])!=0)
+        res$MatVrai[Ind_b[k],][Ind_a] <- a
+      }
+    }
+    
+    
+    ### Iterations
+    Vrai[2] <- LogVraiF(res$MatVrai)
+    test <- abs(Vrai[2]-Vrai[1])
+    Vrai[1] <- Vrai[2]
+    Rs <- Rs+1
+    print(test)
+  }
+  Rg <- apply(res$MatVrai,1,which.max)
+  return(list(theta=theta,Rg=Rg,Rs=Rs,Vrai=Vrai[1]))
+}
+
+#####################################################################################################################################################################
