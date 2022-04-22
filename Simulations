@@ -1,0 +1,281 @@
+
+########## Codes for data simulations
+
+library(MASS)
+
+#################################################################################################################################################################
+
+### Simulation of well separetad populations. np: number of populations; p: number of explonatory variables; n: number of individuals; S: number of species;
+### i: minimal number of individuals per species; rp: number of repetitions.
+
+
+SimulWellSep = function(np,p,n=500,S=50,i=5,rp=10){
+#### Repartion of individual in species
+j <- 0
+while(j<i)
+{
+  ni <- as.vector(table(sample(1:S,n,replace=T)))
+  j <- min(i)
+}
+
+
+##### creation of Z0 
+Z0 <- list()
+for(s in 1:S){
+  Z0[[s]] <- diag(ni[s]*rp)
+}
+
+#### Creation of Z1
+Z1 <- list()
+M1 <- matrix(rep(1,rp),ncol=1)
+for(s in 1:S){
+  Z1[[s]] <- diag(ni[s])%x%M1
+} 
+
+#### Creation of Z2
+Z2 <- list()
+for(s in 1:S){
+  Z2[[s]] <- matrix(rep(1,rp*ni[s]),ncol=1)
+} 
+
+### Simulation of variances
+sigma <- list()
+for(k in 1:np){
+  sigma[[k]] <- runif(3,0.2,1)
+}
+
+### Creation of variance matrix
+MatSigma1 <- list()
+MatSigma <- list()
+for(s in 1:S){
+  for(k in 1:np){
+    MatSigma1[[k]] <- (sigma[[k]][1]*(Z0[[s]]%*%t(Z0[[s]])))+(sigma[[k]][2]*(Z1[[s]]%*%t(Z1[[s]])))+(sigma[[k]][3]*(Z2[[s]]%*%t(Z2[[s]]))) 
+  }
+  MatSigma[[s]] <- MatSigma1
+}
+
+### Simulation of explonatory variables
+X <- list()
+for(s in 1:S){
+  a <- rep(1,ni[s]*rp )
+  X[[s]] <- cbind(a,matrix(rnorm(ni[s]*p*rp,0,1),nrow=ni[s]*rp,ncol=p))
+}
+
+### Simulations of beta-k
+Beta <- list()
+for(k in 1:np){
+  Beta[[k]] <- runif(p+1,-1000,1000)
+}
+
+
+### Creation of Ys
+Groups <- sample(1:np,S,replace=T)
+Y <- list()
+for(s in 1:S){
+  k <- Groups[[s]]
+  Bet <- matrix(Beta[[k]],ncol=1)
+  Xe <- X[[s]]
+  V <- MatSigma[[s]][[k]]
+  Mu <- Xe%*%Bet
+  Y[[s]] <- mvrnorm(mu=Mu,Sigma=V)
+}
+
+
+### global matrix
+Yf <- Y[[1]]
+Xf <- X[[1]]
+for(s in 2:S){
+  Yf <- c(Yf,Y[[s]])
+  Xf <- rbind(Xf,X[[s]])
+}
+
+### indexation
+indI <- rep(1:n,each=rp)
+indEs <- rep(1,ni[1]*rp)
+for(s in 2:S){
+  indEs <- c(indEs,rep(s,ni[s]*rp))
+}
+
+
+### Data frame creation
+data <- as.data.frame((cbind(Yf,Xf[,-1],indI,indEs)))
+
+### Results
+res<- list() 
+
+res$data <- data
+
+res$class <- Groups
+
+MatBeta <- matrix(Beta[[1]],ncol=1)
+for(k in 2:np){
+  MatBeta <- cbind(MatBeta,matrix(Beta[[k]],ncol=1))
+}
+res$Beta <- MatBeta
+
+sigmaRes <- sigma[[1]][1]
+sigmaInd <- sigma[[1]][2]
+sigmaEs <- sigma[[1]][3]
+for(k in 2:np){
+  sigmaRes <- c(sigmaRes,sigma[[k]][1])
+  sigmaInd <- c(sigmaInd,sigma[[k]][2])
+  sigmaEs <- c(sigmaEs,sigma[[k]][3])
+}
+res$sigmaRes <- sigmaRes
+res$sigmaInd <- sigmaInd
+res$sigmaEs <- sigmaEs
+res$ni <- ni
+
+return(res)
+}
+
+################################################################################################################################################################
+
+####### Drawing of value in a p-sphere
+MatBetaSphere = function(R,p,np){
+  MatBeta <- matrix(ncol=np,nrow=p+1)
+  for(k in 1:np){
+    b <- -1
+    while(b<0){
+      bt <- c()
+      bt[1] <- runif(1,0,R)
+      for(j in 2:(p)){
+        bt[j] <- runif(1,0,R-bt[j-1])
+      }
+      b <- R-sum(bt)
+    }
+    bt[p+1] <- b
+    a <- sample(c(-1,1),p+1,replace=T)
+    u <- sqrt(bt)*a
+    MatBeta[,k] <- u
+  }
+  return(MatBeta)
+}
+
+
+###################################################################################################################################################################
+
+
+### Simulation of closed populations. R: radius of the p-sphere in which fixed effects parameter are drawn. np: number of populations; p: number of explonatory variables; n: number of individuals; S: number of species;
+### i: minimal number of individuals per species; rp: number of repetitions.
+
+SimulNear = function(R,np,p,n=500,S=50,i=5,rp=10){
+  #### Repartion of individual in species
+  j <- 0
+  while(j<i)
+  {
+    ni <- as.vector(table(sample(1:S,n,replace=T)))
+    j <- min(i)
+  }
+  
+  
+  ##### Creation of Z0 
+  Z0 <- list()
+  for(s in 1:S){
+    Z0[[s]] <- diag(ni[s]*rp)
+  }
+  
+  #### Creation of Z1
+  Z1 <- list()
+  M1 <- matrix(rep(1,rp),ncol=1)
+  for(s in 1:S){
+    Z1[[s]] <- diag(ni[s])%x%M1
+  } 
+  
+  #### Creation of Z2
+  Z2 <- list()
+  for(s in 1:S){
+    Z2[[s]] <- matrix(rep(1,rp*ni[s]),ncol=1)
+  } 
+  
+  ### Simulation of variances
+  sigma <- list()
+  for(k in 1:np){
+    sigma[[k]] <- runif(3,0.2,1)
+  }
+  
+  ### Creation of variance matrix
+  MatSigma1 <- list()
+  MatSigma <- list()
+  for(s in 1:S){
+    for(k in 1:np){
+      MatSigma1[[k]] <- (sigma[[k]][1]*(Z0[[s]]%*%t(Z0[[s]])))+(sigma[[k]][2]*(Z1[[s]]%*%t(Z1[[s]])))+(sigma[[k]][3]*(Z2[[s]]%*%t(Z2[[s]]))) 
+    }
+    MatSigma[[s]] <- MatSigma1
+  }
+  
+  ### Simulation of explonatory variables
+  X <- list()
+  for(s in 1:S){
+    a <- rep(1,ni[s]*rp )
+    X[[s]] <- cbind(a,matrix(rnorm(ni[s]*p*rp,0,1),nrow=ni[s]*rp,ncol=p))
+  }
+  
+  ### Simulations of beta-k
+  Beta <- list()
+  MatBeta <- MatBetaSphere(R,p,np)
+  for(k in 1:np){
+    Beta[[k]] <- MatBeta[,k]
+  }
+  
+  
+  ### Creation of  Ys
+  Groups <- sample(1:np,S,replace=T)
+  Y <- list()
+  for(s in 1:S){
+    k <- Groups[[s]]
+    Bet <- matrix(Beta[[k]],ncol=1)
+    Xe <- X[[s]]
+    V <- MatSigma[[s]][[k]]
+    Mu <- Xe%*%Bet
+    Y[[s]] <- mvrnorm(mu=Mu,Sigma=V)
+  }
+  
+  
+  ### Global matrix
+  Yf <- Y[[1]]
+  Xf <- X[[1]]
+  for(s in 2:S){
+    Yf <- c(Yf,Y[[s]])
+    Xf <- rbind(Xf,X[[s]])
+  }
+  
+  ### indexation
+  indI <- rep(1:n,each=rp)
+  indEs <- rep(1,ni[1]*rp)
+  for(s in 2:S){
+    indEs <- c(indEs,rep(s,ni[s]*rp))
+  }
+  
+  
+  ### Data frame
+  data <- as.data.frame((cbind(Yf,Xf[,-1],indI,indEs)))
+  
+  ### Results
+  res<- list() 
+  
+  res$data <- data
+  
+  res$class <- Groups
+  
+  res$Beta <- MatBeta
+  
+  sigmaRes <- sigma[[1]][1]
+  sigmaInd <- sigma[[1]][2]
+  sigmaEs <- sigma[[1]][3]
+  for(k in 2:np){
+    sigmaRes <- c(sigmaRes,sigma[[k]][1])
+    sigmaInd <- c(sigmaInd,sigma[[k]][2])
+    sigmaEs <- c(sigmaEs,sigma[[k]][3])
+  }
+  res$sigmaRes <- sigmaRes
+  res$sigmaInd <- sigmaInd
+  res$sigmaEs <- sigmaEs
+  res$ni <- ni
+  
+  return(res)
+}
+
+#####################################################################################################################################################################
+
+
