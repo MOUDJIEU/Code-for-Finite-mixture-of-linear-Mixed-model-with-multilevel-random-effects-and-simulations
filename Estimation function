@@ -277,7 +277,7 @@ Maxim = function(Data,MatF,theta)
       TU5k[s] <- sum(diag(U5k[[s]]))
     }
     M0k <- sum(MatF[,k]*TU0k)
-    M1k <- sum(MatF[,k]*TU1k)
+    M1k <- sum(MatF[,k]*TU1k) 
     M2k <- sum(MatF[,k]*TU2k)
     M3k <- sum(MatF[,k]*TU3k)
     M4k <- sum(MatF[,k]*TU4k)
