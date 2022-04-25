@@ -314,6 +314,7 @@ Maxim = function(Data,MatF,theta)
 #######################################################################################################################################################################
 
 ######################################### EM-Algorithm 
+######## The first column of Data must be is Y, the last column must be the indicator of species and before it it must be the column of indicators of individuals
 
 EstimF = function(formula,Data,G,e=0.00001,Nb=30)
 {
