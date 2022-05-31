@@ -15,7 +15,7 @@ j <- 0
 while(j<i)
 {
   ni <- as.vector(table(sample(1:S,n,replace=T)))
-  j <- min(i)
+  j <- min(ni)
 }
 
 
@@ -165,7 +165,7 @@ SimulNear = function(R,np,p,n=500,S=50,i=5,rp=10){
   while(j<i)
   {
     ni <- as.vector(table(sample(1:S,n,replace=T)))
-    j <- min(i)
+    j <- min(ni)
   }
   
   
